@@ -5,7 +5,7 @@
  *
  * Implementation for distributed hash table (DHT).
  *
- * Name: 
+ * Name: Corwin Willms, Brooke Sindelar
  *
  */
 
@@ -28,8 +28,13 @@ local methods
 int dht_init()
 {
     local_init();
-
-    rank = 0;
+    // initialize MPI, use pthreads to spawn server threads.
+    // clients should return with their MPI rank, server threads
+    // should enter an infinite loop of receiving from any source
+    MPI_Init(NULL, NULL);
+    MPI_Comm_size(MPI_COMM_WORLD, &comm_sz);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    
     return rank;
 }
 
@@ -58,5 +63,6 @@ void dht_sync()
 void dht_destroy(FILE *output)
 {
     local_destroy(output);
+    MPI_Finalize()
 }
 
