@@ -27,13 +27,15 @@ local methods
 */
 int dht_init()
 {
-    local_init();
     // initialize MPI, use pthreads to spawn server threads.
     // clients should return with their MPI rank, server threads
     // should enter an infinite loop of receiving from any source
     MPI_Init(NULL, NULL);
     MPI_Comm_size(MPI_COMM_WORLD, &comm_sz);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+    local_init();
+    //spawn server threads after hashmap initialization
     
     return rank;
 }
