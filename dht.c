@@ -17,7 +17,19 @@
 /*
  * Private module variable: current process ID (MPI rank)
  */
+
+// function prototypes
+void* server_loop(void* rank);
+void dht_put(const char *key, long value);
+long dht_get(const char *key);
+size_t dht_size();
+void dht_sync();
+void dht_destroy(FILE *output);
+
+
 static int rank;
+pthread_t* server;
+int comm_sz;
 
 // spawn and manage server thread along w/ dht_destroy()
 /* 
@@ -36,8 +48,25 @@ int dht_init()
 
     local_init();
     //spawn server threads after hashmap initialization
-    
+    server = malloc(sizeof(pthread_t));
+    if (pthread_create(server, NULL, server_loop, (void*) rank) != 0) {
+            printf("ERROR: could not create thread\n");
+            exit(EXIT_FAILURE);
+        }
+    printf("Hello from main thread rank: %d\n", rank);
     return rank;
+}
+
+void* server_loop(void* rank) {
+    //int x = 1;
+    int my_rank = (int)rank;
+    while (true) {
+        printf("Hello from server thread rank: %d\n", my_rank);
+        if (true){
+            break;
+        }
+    }
+    return NULL;
 }
 
 void dht_put(const char *key, long value)
@@ -65,6 +94,10 @@ void dht_sync()
 void dht_destroy(FILE *output)
 {
     local_destroy(output);
-    MPI_Finalize()
+    if (pthread_join(*server, NULL) != 0) {
+            printf("ERROR: could not join pthread\n");
+            exit(EXIT_FAILURE);
+        }
+    MPI_Finalize();
 }
 
