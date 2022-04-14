@@ -17,6 +17,7 @@
 
 #define PUT_REQUEST 1
 #define GET_REQUEST 2
+#define BREAK_LOOP 3
 
 /*
  * Private module variable: current process ID (MPI rank)
@@ -40,8 +41,8 @@ void unlock(pthread_mutex_t *mut);
 typedef struct remote_request {
     int sender_rank;
     int req_type;
-    char key[MAX_KEYLEN];
     long value;
+    char key[MAX_KEYLEN];
 } remote_req;
 
 static int rank;
@@ -89,26 +90,40 @@ int dht_init()
 }
 
 void* server_loop() {
-    //int x = 1;
-    int my_rank = (int)rank;
-    char *key = NULL;
-    while (true) {
-        printf("Hello from server thread rank: %d\n", my_rank);
-        struct remote_request *request;
-        MPI_recv(&request, // buffer 
-                    sizeof(remote_request), // count
+    bool loop = true;
+    long get_answer;
+    struct remote_request *request = malloc(sizeof(struct remote_request));
+    while (loop) {
+        printf("Hello from server thread rank: %d\n", rank);
+        MPI_Recv(request, // buffer 
+                    sizeof(request), // count
                     MPI_BYTE, // MPI_datatype (possibly created mpi struct type or some type for C struct)
                     MPI_ANY_SOURCE, // source
-                    0, // tag
+                    rank, // tag
                     MPI_COMM_WORLD, // MPI_Comm
                     MPI_STATUS_IGNORE); // MPI_status 
-        switch (request.req_type) {
-            case 
+        switch (request->req_type) {
+            case PUT_REQUEST: 
+                local_put(request->key, request->value);
+                break;
+            case GET_REQUEST:
+                get_answer = local_get(request->key);
+                MPI_Ssend(&get_answer, // buffer (change to either MPI struct or find way to send C struct)
+                            1, // count
+                            MPI_LONG, // MPI_datatype
+                            request->sender_rank, // destination
+                            request->sender_rank, // tag
+                            MPI_COMM_WORLD); // MPI_Comm
+                break;
+            case BREAK_LOOP:
+                loop = false;
+                break;
         }
         if (true){
             break;
         }
     }
+    free(request);
     return NULL;
 }
 
@@ -118,18 +133,18 @@ void dht_put(const char *key, long value) // Lam recommends using tag as the rec
     int owner = hash(key);
     if (false)  {// commented until finished with simpler functions(owner != rank) {
         // remote procedure call to owner
-        struct remote_request req;
-        req.sender_rank = rank;
-        req.req_type = PUT_REQUEST;
-        //req.key = key;
-        strncpy(req.key, key, strlen(key));
-        req.value = value;
-        MPI_Ssend(&req, // buffer (change to either MPI struct or find way to send C struct)
-                    sizeof(struct remote_request), // count
+        struct remote_request *req = malloc(sizeof(struct remote_request));
+        req->sender_rank = rank;
+        req->req_type = PUT_REQUEST;
+        strncpy(req->key, key, strlen(key));
+        req->value = value;
+        MPI_Ssend(req, // buffer (change to either MPI struct or find way to send C struct)
+                    sizeof(req), // count
                     MPI_BYTE, // MPI_datatype
                     owner, // destination
-                    0, // tag
+                    owner, // tag
                     MPI_COMM_WORLD); // MPI_Comm
+        free(req);
     } else {
         // make sure this doesn't happen during sync (pthreads mutex??)
         lock(&hash_guard);
@@ -144,28 +159,32 @@ long dht_get(const char *key)
     long value = KEY_NOT_FOUND;
     // check if key is 'owned' by another process
     int owner = hash(key);
-
+/*
     if (false) { // commented until finished with simpler functions(owner != rank) {
         // remote procedure call to owner
-        MPI_Ssend(key, // buffer (change to either MPI struct or find way to send C struct)
-                    strlen(key), // count
-                    MPI_CHAR, // MPI_datatype
+        struct remote_request req;
+        req.sender_rank = rank;
+        req.req_type = PUT_REQUEST;
+        strncpy(req.key, key, strlen(key));
+        MPI_Ssend(&req, // buffer (change to either MPI struct or find way to send C struct)
+                    sizeof(req), // count
+                    MPI_BYTE, // MPI_datatype
                     owner, // destination
-                    0, // tag
+                    owner, // tag
                     MPI_COMM_WORLD); // MPI_Comm
         
         MPI_Recv(&value, // buffer 
                     1, // count
                     MPI_LONG, // MPI_datatype (need to receive a size_t, possibly create struct type)
                     owner, // source
-                    0, // tag
+                    rank, // tag
                     MPI_COMM_WORLD, // MPI_Comm
                     MPI_STATUS_IGNORE); // MPI_status
-    } else {
+    } else {*/
         lock(&hash_guard);
         value = local_get(key);
         unlock(&hash_guard);
-    }
+   // }
 
     return value;
 }
@@ -211,6 +230,17 @@ void dht_destroy(FILE *output)
 {
     // Barrier untill all clients have finished processing commands
     // then MPI_Ssend to all clients telling them to exit infinite loop
+    MPI_Barrier(MPI_COMM_WORLD);
+    struct remote_request req;
+    req.sender_rank = rank;
+    req.req_type = BREAK_LOOP;
+    MPI_Ssend(&req, // buffer (change to either MPI struct or find way to send C struct)
+                    sizeof(req), // count
+                    MPI_BYTE, // MPI_datatype
+                    rank, // destination
+                    rank, // tag
+                    MPI_COMM_WORLD); // MPI_Comm
+
     local_destroy(output);
 
     // join server thread

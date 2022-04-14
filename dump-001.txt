@@ -1,3 +1,0 @@
-Process 1
-  Key="baz" Value=1
-  Key="stuff" Value=2
