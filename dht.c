@@ -11,31 +11,43 @@
 
 #include <mpi.h>
 #include <pthread.h>
+#include "local.h"
 
 #include "dht.h"
+
+#define PUT_REQUEST 1
+#define GET_REQUEST 2
 
 /*
  * Private module variable: current process ID (MPI rank)
  */
 
+
+pthread_mutex_t hash_guard = PTHREAD_MUTEX_INITIALIZER;
+
+
 // function prototypes
-void* server_loop(void* rank);
+void* server_loop();
 void dht_put(const char *key, long value);
 long dht_get(const char *key);
 size_t dht_size();
 void dht_sync();
 void dht_destroy(FILE *output);
 int hash(const char *name);
+void lock(pthread_mutex_t *mut);
+void unlock(pthread_mutex_t *mut);
 
 typedef struct remote_request {
     int sender_rank;
-    char req_type[MAX_LINE_LEN];
-    char key[MAX_LINE_LEN];
+    int req_type;
+    char key[MAX_KEYLEN];
+    long value;
 } remote_req;
 
 static int rank;
 pthread_t* server;
 int comm_sz;
+
 
 /**
 HINT: Work incrementally! Don't try to implement the entire protocol at once. 
@@ -68,7 +80,7 @@ int dht_init()
     local_init();
     //spawn server threads after hashmap initialization
     server = malloc(sizeof(pthread_t));
-    if (pthread_create(server, NULL, server_loop, (void*) rank) != 0) {
+    if (pthread_create(server, NULL, server_loop, NULL) != 0) {
             printf("ERROR: could not create thread\n");
             exit(EXIT_FAILURE);
         }
@@ -76,13 +88,12 @@ int dht_init()
     return rank;
 }
 
-void* server_loop(void* rank) {
+void* server_loop() {
     //int x = 1;
     int my_rank = (int)rank;
     char *key = NULL;
     while (true) {
         printf("Hello from server thread rank: %d\n", my_rank);
-        /* commented until sending structs is figured out
         struct remote_request *request;
         MPI_recv(&request, // buffer 
                     sizeof(remote_request), // count
@@ -90,7 +101,10 @@ void* server_loop(void* rank) {
                     MPI_ANY_SOURCE, // source
                     0, // tag
                     MPI_COMM_WORLD, // MPI_Comm
-                    MPI_STATUS_IGNORE); // MPI_status */
+                    MPI_STATUS_IGNORE); // MPI_status 
+        switch (request.req_type) {
+            case 
+        }
         if (true){
             break;
         }
@@ -98,7 +112,7 @@ void* server_loop(void* rank) {
     return NULL;
 }
 
-void dht_put(const char *key, long value)
+void dht_put(const char *key, long value) // Lam recommends using tag as the receivers rank
 {
     // check if key is 'owned' by another process
     int owner = hash(key);
@@ -106,16 +120,21 @@ void dht_put(const char *key, long value)
         // remote procedure call to owner
         struct remote_request req;
         req.sender_rank = rank;
-        req.req_type = "put";
-        req.key = key;
+        req.req_type = PUT_REQUEST;
+        //req.key = key;
+        strncpy(req.key, key, strlen(key));
+        req.value = value;
         MPI_Ssend(&req, // buffer (change to either MPI struct or find way to send C struct)
-                    strlen(key), // count
+                    sizeof(struct remote_request), // count
                     MPI_BYTE, // MPI_datatype
                     owner, // destination
                     0, // tag
                     MPI_COMM_WORLD); // MPI_Comm
     } else {
+        // make sure this doesn't happen during sync (pthreads mutex??)
+        lock(&hash_guard);
         local_put(key, value);
+        unlock(&hash_guard);
     }
 
 }
@@ -125,6 +144,7 @@ long dht_get(const char *key)
     long value = KEY_NOT_FOUND;
     // check if key is 'owned' by another process
     int owner = hash(key);
+
     if (false) { // commented until finished with simpler functions(owner != rank) {
         // remote procedure call to owner
         MPI_Ssend(key, // buffer (change to either MPI struct or find way to send C struct)
@@ -142,7 +162,9 @@ long dht_get(const char *key)
                     MPI_COMM_WORLD, // MPI_Comm
                     MPI_STATUS_IGNORE); // MPI_status
     } else {
+        lock(&hash_guard);
         value = local_get(key);
+        unlock(&hash_guard);
     }
 
     return value;
@@ -210,4 +232,21 @@ int hash(const char *name)
         hash = ((hash << 5) + hash) + (unsigned)(*name++);
     }
     return hash % comm_sz;
+}
+
+
+void lock(pthread_mutex_t *mut)
+{
+    if (pthread_mutex_lock(mut) != 0) {
+        printf("ERROR: could not acquire mutex\n");
+        exit(EXIT_FAILURE);
+    }
+}
+
+void unlock(pthread_mutex_t *mut)
+{
+    if (pthread_mutex_unlock(mut) != 0) {
+        printf("ERROR: could not unlock mutex\n");
+        exit(EXIT_FAILURE);
+    }
 }
