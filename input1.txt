@@ -7,7 +7,7 @@ put bar 99
 put z 7
 sync
 get xyz
-get blah
+get z
 get qw
 size
 
